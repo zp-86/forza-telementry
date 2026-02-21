@@ -14,15 +14,11 @@ console.log(`[Telemetry] Starting telemetry server...`);
 
 // Forza Motorsport 2023 / FM7 Dash packet layout:
 // Sled section: 232 bytes (58 fields * 4 bytes each)
-// If packet is 324 bytes → there's a 12-byte gap (padding) before Dash extras at offset 244
-// If packet is 311 bytes → Dash extras start right after Sled at offset 232
+// If packet is 324 bytes (FH4) → there's a 12-byte gap (padding) before Dash extras at offset 244
+// If packet is 311 (FM7) or 331 (FM8) bytes → Dash extras start right after Sled at offset 232
 // Dash extras: PositionX..TrackOrdinal
 
 function parseDashPacket(buf) {
-    // Determine whether we have the 12-byte padding variant
-    const hasPadding = buf.length >= 324;
-    const dashStart = hasPadding ? 244 : 232;
-
     // Read Sled section at fixed offsets
     const sled = {
         IsRaceOn: buf.readInt32LE(0),
@@ -89,6 +85,10 @@ function parseDashPacket(buf) {
     if (buf.length < 300) {
         return sled;
     }
+
+    // FH4 (324 bytes) has a 12-byte padding gap after sled.
+    // FM7 (311 bytes) and FM8/FM2023 (331 bytes) have NO gap.
+    const dashStart = (buf.length === 324) ? 244 : 232;
 
     // Dash extras start at dashStart
     let o = dashStart;

@@ -1,12 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
-
-// The track map works entirely from real position data captured during gameplay.
-// When the user drives the first lap, we capture those points as the "reference line" (track outline).
-// Subsequent laps are overlaid on top for comparison.
-// There is NO hardcoded shape — real game coordinates are the only source of truth.
-// A settings toggle lets the user hide/show the reference track outline.
+import { useEffect, useRef, useState, useMemo } from 'react';
 
 export function TrackMap({
     currentX,
@@ -21,7 +15,8 @@ export function TrackMap({
     historicalLines?: { x: number; z: number }[][];
     referenceLine?: { x: number; z: number }[];
 }) {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+    const fgCanvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [showReference, setShowReference] = useState(true);
     const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -42,33 +37,17 @@ export function TrackMap({
         return () => ro.disconnect();
     }, []);
 
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        ctx.clearRect(0, 0, dims.w, dims.h);
-
-        // Collect all known points for auto-scaling
+    // Compute map bounds and scalar ONCE whenever the completed laps change
+    const transform = useMemo(() => {
         const allPoints: { x: number; z: number }[] = [];
         if (showReference && referenceLine.length > 0) allPoints.push(...referenceLine);
         historicalLines.forEach(line => allPoints.push(...line));
-        if (currentX !== undefined && currentZ !== undefined) allPoints.push({ x: currentX, z: currentZ });
 
+        // If no completed laps yet, we center around the car's current position to show it, or origin
         if (allPoints.length < 2) {
-            // Not enough data — draw placeholder
-            ctx.fillStyle = 'rgba(255,255,255,0.05)';
-            ctx.fillRect(0, 0, dims.w, dims.h);
-            ctx.fillStyle = 'rgba(255,255,255,0.2)';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Waiting for position data…', dims.w / 2, dims.h / 2);
-            ctx.fillText('Drive a lap to build the track map', dims.w / 2, dims.h / 2 + 24);
-            return;
+            return null;
         }
 
-        // Compute bounding box with padding
         const pad = 60;
         let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
         for (const p of allPoints) {
@@ -78,41 +57,66 @@ export function TrackMap({
             if (p.z > maxZ) maxZ = p.z;
         }
 
-        const rangeX = maxX - minX || 1;
-        const rangeZ = maxZ - minZ || 1;
+        // Protect against zero range causing infinity scale
+        const rangeX = (maxX - minX) || 100;
+        const rangeZ = (maxZ - minZ) || 100;
+
+        // Auto scale to fit track
         const scale = Math.min((dims.w - pad * 2) / rangeX, (dims.h - pad * 2) / rangeZ);
         const cx = dims.w / 2;
         const cy = dims.h / 2;
         const midX = (maxX + minX) / 2;
         const midZ = (maxZ + minZ) / 2;
 
-        const toCanvas = (x: number, z: number) => ({
-            x: cx + (x - midX) * scale,
-            y: cy + (z - midZ) * scale,
-        });
+        return {
+            toCanvas: (x: number, z: number) => ({
+                x: cx + (x - midX) * scale,
+                y: cy + (z - midZ) * scale,
+            })
+        };
+    }, [historicalLines, referenceLine, showReference, dims]);
+
+    // Layer 1: Draw track outlines (only runs when lines change, not every 30ms frame)
+    useEffect(() => {
+        const canvas = bgCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.clearRect(0, 0, dims.w, dims.h);
+
+        if (!transform) {
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            ctx.fillRect(0, 0, dims.w, dims.h);
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for lap completion…', dims.w / 2, dims.h / 2);
+            ctx.fillText('Drive your first lap to build the map limits.', dims.w / 2, dims.h / 2 + 24);
+            return;
+        }
 
         // 1. Draw reference track outline (from first lap)
         if (showReference && referenceLine.length > 1) {
-            // Thick faded "road" background
             ctx.beginPath();
             referenceLine.forEach((p, i) => {
-                const pt = toCanvas(p.x, p.z);
+                const pt = transform.toCanvas(p.x, p.z);
                 if (i === 0) ctx.moveTo(pt.x, pt.y);
                 else ctx.lineTo(pt.x, pt.y);
             });
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-            ctx.lineWidth = 24;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 26;
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             ctx.stroke();
 
             // Thin center line
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.lineWidth = 1.5;
             ctx.stroke();
 
             // Start/finish marker
-            const start = toCanvas(referenceLine[0].x, referenceLine[0].z);
+            const start = transform.toCanvas(referenceLine[0].x, referenceLine[0].z);
             ctx.fillStyle = '#f59e0b';
             ctx.beginPath();
             ctx.arc(start.x, start.y, 6, 0, Math.PI * 2);
@@ -131,11 +135,12 @@ export function TrackMap({
             'rgba(236, 72, 153, 0.7)', // pink
             'rgba(251, 191, 36, 0.7)', // amber
         ];
+
         historicalLines.forEach((line, idx) => {
             if (line.length < 2) return;
             ctx.beginPath();
             line.forEach((p, i) => {
-                const pt = toCanvas(p.x, p.z);
+                const pt = transform.toCanvas(p.x, p.z);
                 if (i === 0) ctx.moveTo(pt.x, pt.y);
                 else ctx.lineTo(pt.x, pt.y);
             });
@@ -145,14 +150,30 @@ export function TrackMap({
             ctx.stroke();
         });
 
-        // 3. Draw current car position
+    }, [historicalLines, referenceLine, showReference, dims, transform]);
+
+
+    // Layer 2: Draw current car position (runs 30fps)
+    useEffect(() => {
+        const canvas = fgCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.clearRect(0, 0, dims.w, dims.h);
+
         if (currentX !== undefined && currentZ !== undefined) {
-            const pt = toCanvas(currentX, currentZ);
+
+            // If we don't have a map transform yet, just render in center
+            let pt = { x: dims.w / 2, y: dims.h / 2 };
+            if (transform) {
+                pt = transform.toCanvas(currentX, currentZ);
+            }
 
             // Glow
             ctx.beginPath();
             ctx.arc(pt.x, pt.y, 14, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
             ctx.fill();
 
             ctx.save();
@@ -167,17 +188,17 @@ export function TrackMap({
             ctx.closePath();
             ctx.fillStyle = '#3b82f6';
             ctx.fill();
-            ctx.strokeStyle = '#60a5fa';
+            ctx.strokeStyle = '#93c5fd';
             ctx.lineWidth = 1;
             ctx.stroke();
             ctx.restore();
         }
 
-    }, [currentX, currentZ, carYaw, historicalLines, referenceLine, showReference, dims]);
+    }, [currentX, currentZ, carYaw, dims, transform]);
 
     return (
         <div ref={containerRef} className="relative w-full h-full flex flex-col group">
-            <div className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-3 right-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                 <label className="flex items-center space-x-2 text-xs text-neutral-400 bg-neutral-900/90 px-3 py-1.5 rounded-lg border border-neutral-700 cursor-pointer select-none backdrop-blur-sm">
                     <input
                         type="checkbox"
@@ -188,11 +209,21 @@ export function TrackMap({
                     <span>Show Track Outline</span>
                 </label>
             </div>
+
+            {/* Background layer (Static lines) */}
             <canvas
-                ref={canvasRef}
+                ref={bgCanvasRef}
                 width={dims.w}
                 height={dims.h}
-                className="w-full h-full"
+                className="absolute inset-0 w-full h-full z-0"
+            />
+
+            {/* Foreground layer (30fps Car) */}
+            <canvas
+                ref={fgCanvasRef}
+                width={dims.w}
+                height={dims.h}
+                className="absolute inset-0 w-full h-full z-10 pointer-events-none"
             />
         </div>
     );
