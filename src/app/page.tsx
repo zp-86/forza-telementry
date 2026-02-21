@@ -86,6 +86,17 @@ export default function Home() {
     });
   };
 
+  const handleTogglePlayerVisibility = (playerName: string, isVisible: boolean) => {
+    setHiddenLapIds(prev => {
+      const next = new Set(prev);
+      laps.filter(l => l.playerName === playerName).forEach(l => {
+        if (isVisible) next.delete(l.id);
+        else next.add(l.id);
+      });
+      return next;
+    });
+  };
+
   const getSpeedMPH = (speedMs: number | undefined, vx: number, vy: number, vz: number) => {
     if (typeof speedMs === 'number' && !isNaN(speedMs)) {
       return Math.round(Math.max(0, speedMs * 2.23694));
@@ -264,6 +275,7 @@ export default function Home() {
               onDelete={handleDelete}
               visibleLapIds={visibleLapIds}
               onToggleVisibility={handleToggleVisibility}
+              onTogglePlayerVisibility={handleTogglePlayerVisibility}
               savedLapIds={savedLapIds}
             />
           </div>

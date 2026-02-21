@@ -12,6 +12,7 @@ export function LapHistory({
     onDelete,
     visibleLapIds,
     onToggleVisibility,
+    onTogglePlayerVisibility,
     savedLapIds,
 }: {
     laps: LapData[],
@@ -19,10 +20,11 @@ export function LapHistory({
     currentLapTime?: number,
     onCompare: (lap1: LapData, lap2: LapData) => void,
     onView: (lap: LapData) => void,
-    onSave?: (lap: LapData) => void,
-    onDelete?: (lapId: string) => void,
+    onSave?: (lap: LapData) => Promise<void>,
+    onDelete?: (lapId: string) => Promise<void>,
     visibleLapIds?: Set<string>,
     onToggleVisibility?: (lapId: string) => void,
+    onTogglePlayerVisibility?: (playerName: string, isVisible: boolean) => void,
     savedLapIds?: Set<string>,
 }) {
     const [selectedLaps, setSelectedLaps] = useState<string[]>([]);
@@ -135,148 +137,164 @@ export function LapHistory({
                     </div>
                 )}
 
-                {players.map(player => (
-                    <div key={player} className="space-y-2">
-                        <h3 className="text-indigo-400 font-bold text-sm border-b border-neutral-800 pb-1 flex items-center gap-2">
-                            {player}
-                            <span className="text-neutral-600 text-xs font-normal">
-                                ({laps.filter(l => l.playerName === player).length} laps)
-                            </span>
-                        </h3>
+                {players.map(player => {
+                    const playerLaps = laps.filter(l => l.playerName === player);
+                    const allVisible = playerLaps.every(l => visibleLapIds ? visibleLapIds.has(l.id) : true);
 
-                        <div className="space-y-2">
-                            {laps.filter(l => l.playerName === player).map(lap => {
-                                const isSelected = selectedLaps.includes(lap.id);
-                                const isBest = lap.finalTime === bestOverallLapTime && !lap.invalid;
-                                const isSaved = savedLapIds?.has(lap.id);
-                                const isVisible = visibleLapIds ? visibleLapIds.has(lap.id) : true;
+                    return (
+                        <div key={player} className="space-y-2">
+                            <div className="flex justify-between items-center border-b border-neutral-800 pb-1">
+                                <h3 className="text-indigo-400 font-bold text-sm flex items-center gap-2">
+                                    {player}
+                                    <span className="text-neutral-600 text-xs font-normal">
+                                        ({playerLaps.length} laps)
+                                    </span>
+                                </h3>
+                                {onTogglePlayerVisibility && (
+                                    <button
+                                        onClick={() => onTogglePlayerVisibility(player, !allVisible)}
+                                        className="text-neutral-500 hover:text-white transition-colors"
+                                        title={allVisible ? "Hide all player laps" : "Show all player laps"}
+                                    >
+                                        {allVisible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                                    </button>
+                                )}
+                            </div>
 
-                                return (
-                                    <div
-                                        key={lap.id}
-                                        onClick={() => handleSelect(lap.id)}
-                                        className={`
+                            <div className="space-y-2">
+                                {playerLaps.map(lap => {
+                                    const isSelected = selectedLaps.includes(lap.id);
+                                    const isBest = lap.finalTime === bestOverallLapTime && !lap.invalid;
+                                    const isSaved = savedLapIds?.has(lap.id);
+                                    const isVisible = visibleLapIds ? visibleLapIds.has(lap.id) : true;
+
+                                    return (
+                                        <div
+                                            key={lap.id}
+                                            onClick={() => handleSelect(lap.id)}
+                                            className={`
                       flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none
                       ${isSelected
-                                                ? 'bg-indigo-900/40 border-indigo-500/50 scale-[1.02]'
-                                                : 'bg-neutral-900/50 border-neutral-800 hover:bg-neutral-800 hover:border-neutral-700'
-                                            }
+                                                    ? 'bg-indigo-900/40 border-indigo-500/50 scale-[1.02]'
+                                                    : 'bg-neutral-900/50 border-neutral-800 hover:bg-neutral-800 hover:border-neutral-700'
+                                                }
                     `}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            {/* Visibility toggle */}
-                                            {onToggleVisibility && (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); onToggleVisibility(lap.id); }}
-                                                    className="text-neutral-600 hover:text-white transition-colors"
-                                                    title={isVisible ? "Hide from map" : "Show on map"}
-                                                >
-                                                    {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                                                </button>
-                                            )}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                {/* Visibility toggle */}
+                                                {onToggleVisibility && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onToggleVisibility(lap.id); }}
+                                                        className="text-neutral-600 hover:text-white transition-colors"
+                                                        title={isVisible ? "Hide from map" : "Show on map"}
+                                                    >
+                                                        {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                )}
 
-                                            <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-400 text-xs">
-                                                {lap.lapNumber}
-                                            </div>
-
-                                            {lap.invalid && (
-                                                <div title="Invalid Lap (Paused/Off Track/Pit)">
-                                                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                                                <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-400 text-xs">
+                                                    {lap.lapNumber}
                                                 </div>
-                                            )}
 
-                                            {isBest && (
-                                                <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                                                    Fastest
-                                                </div>
-                                            )}
+                                                {lap.invalid && (
+                                                    <div title="Invalid Lap (Paused/Off Track/Pit)">
+                                                        <AlertTriangle className="w-4 h-4 text-red-500" />
+                                                    </div>
+                                                )}
 
-                                            {isSaved && (
-                                                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                                                    💾 Saved
-                                                </div>
-                                            )}
-                                        </div>
+                                                {isBest && (
+                                                    <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                                                        Fastest
+                                                    </div>
+                                                )}
 
-                                        <div className="flex flex-col items-end gap-2 text-right">
-                                            <div className="font-mono text-lg font-bold tracking-tight flex items-center justify-end gap-2">
-                                                <Clock className="w-3 h-3 text-neutral-500" />
-                                                {lap.invalid ? (
-                                                    <span className="text-neutral-500 line-through">{formatTime(lap.finalTime)}</span>
-                                                ) : (
-                                                    <span className={isBest ? 'text-emerald-400' : 'text-white'}>
-                                                        {formatTime(lap.finalTime)}
-                                                    </span>
+                                                {isSaved && (
+                                                    <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                                                        💾 Saved
+                                                    </div>
                                                 )}
                                             </div>
 
-                                            {!lap.invalid && !isBest && lap.finalTime > 0 && bestOverallLapTime !== Infinity && (
-                                                <div className="text-xs font-mono text-red-400/80">
-                                                    +{formatTime(lap.finalTime - bestOverallLapTime)}
+                                            <div className="flex flex-col items-end gap-2 text-right">
+                                                <div className="font-mono text-lg font-bold tracking-tight flex items-center justify-end gap-2">
+                                                    <Clock className="w-3 h-3 text-neutral-500" />
+                                                    {lap.invalid ? (
+                                                        <span className="text-neutral-500 line-through">{formatTime(lap.finalTime)}</span>
+                                                    ) : (
+                                                        <span className={isBest ? 'text-emerald-400' : 'text-white'}>
+                                                            {formatTime(lap.finalTime)}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            )}
 
-                                            {!lap.invalid && (
-                                                <div className="flex items-center gap-2 relative z-10 mt-2">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onView(lap);
-                                                        }}
-                                                        className="px-3 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
-                                                    >
-                                                        <Map className="w-3.5 h-3.5 text-indigo-400" />
-                                                        View
-                                                    </button>
+                                                {!lap.invalid && !isBest && lap.finalTime > 0 && bestOverallLapTime !== Infinity && (
+                                                    <div className="text-xs font-mono text-red-400/80">
+                                                        +{formatTime(lap.finalTime - bestOverallLapTime)}
+                                                    </div>
+                                                )}
 
-                                                    {/* Dropdown menu */}
-                                                    <div className="relative" ref={openMenu === lap.id ? menuRef : null}>
+                                                {!lap.invalid && (
+                                                    <div className="flex items-center gap-2 relative z-10 mt-2">
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                setOpenMenu(openMenu === lap.id ? null : lap.id);
+                                                                onView(lap);
                                                             }}
-                                                            className="p-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded-lg transition-colors"
+                                                            className="px-3 py-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-2"
                                                         >
-                                                            <MoreVertical className="w-3.5 h-3.5 text-neutral-400" />
+                                                            <Map className="w-3.5 h-3.5 text-indigo-400" />
+                                                            View
                                                         </button>
 
-                                                        {openMenu === lap.id && (
-                                                            <div className="absolute right-0 top-full mt-1 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl z-50 min-w-[160px] py-1">
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleExport(lap); }}
-                                                                    className="w-full px-4 py-2 text-left text-xs font-bold uppercase tracking-widest text-neutral-300 hover:bg-neutral-800 flex items-center gap-2"
-                                                                >
-                                                                    <Download className="w-3.5 h-3.5" /> Export JSON
-                                                                </button>
-                                                                {onSave && !isSaved && (
+                                                        {/* Dropdown menu */}
+                                                        <div className="relative" ref={openMenu === lap.id ? menuRef : null}>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setOpenMenu(openMenu === lap.id ? null : lap.id);
+                                                                }}
+                                                                className="p-1.5 bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 rounded-lg transition-colors"
+                                                            >
+                                                                <MoreVertical className="w-3.5 h-3.5 text-neutral-400" />
+                                                            </button>
+
+                                                            {openMenu === lap.id && (
+                                                                <div className="absolute right-0 top-full mt-1 bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl z-50 min-w-[160px] py-1">
                                                                     <button
-                                                                        onClick={(e) => { e.stopPropagation(); onSave(lap); setOpenMenu(null); }}
+                                                                        onClick={(e) => { e.stopPropagation(); handleExport(lap); }}
                                                                         className="w-full px-4 py-2 text-left text-xs font-bold uppercase tracking-widest text-neutral-300 hover:bg-neutral-800 flex items-center gap-2"
                                                                     >
-                                                                        <Save className="w-3.5 h-3.5 text-amber-400" /> Save Lap
+                                                                        <Download className="w-3.5 h-3.5" /> Export JSON
                                                                     </button>
-                                                                )}
-                                                                {onDelete && isSaved && (
-                                                                    <button
-                                                                        onClick={(e) => { e.stopPropagation(); onDelete(lap.id); setOpenMenu(null); }}
-                                                                        className="w-full px-4 py-2 text-left text-xs font-bold uppercase tracking-widest text-red-400 hover:bg-red-900/20 flex items-center gap-2"
-                                                                    >
-                                                                        <Trash2 className="w-3.5 h-3.5" /> Delete Save
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                                    {onSave && !isSaved && (
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); onSave(lap); setOpenMenu(null); }}
+                                                                            className="w-full px-4 py-2 text-left text-xs font-bold uppercase tracking-widest text-neutral-300 hover:bg-neutral-800 flex items-center gap-2"
+                                                                        >
+                                                                            <Save className="w-3.5 h-3.5 text-amber-400" /> Save Lap
+                                                                        </button>
+                                                                    )}
+                                                                    {onDelete && isSaved && (
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); onDelete(lap.id); setOpenMenu(null); }}
+                                                                            className="w-full px-4 py-2 text-left text-xs font-bold uppercase tracking-widest text-red-400 hover:bg-red-900/20 flex items-center gap-2"
+                                                                        >
+                                                                            <Trash2 className="w-3.5 h-3.5" /> Delete Save
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );

@@ -57,6 +57,21 @@ export function TrackMap({
     const [isPanning, setIsPanning] = useState(false);
     const lastMouseRef = useRef({ x: 0, y: 0 });
 
+    const [flipX, setFlipX] = useState(false);
+    const [flipY, setFlipY] = useState(false);
+
+    // load from local storage
+    useEffect(() => {
+        const t = setTimeout(() => {
+            if (localStorage.getItem('flipX') === 'true') setFlipX(true);
+            if (localStorage.getItem('flipY') === 'true') setFlipY(true);
+        }, 0);
+        return () => clearTimeout(t);
+    }, []);
+
+    const toggleFlipX = () => { setFlipX(v => { localStorage.setItem('flipX', (!v).toString()); return !v; }); };
+    const toggleFlipY = () => { setFlipY(v => { localStorage.setItem('flipY', (!v).toString()); return !v; }); };
+
     // Tooltip state
     const [tooltip, setTooltip] = useState<{
         x: number; y: number;
@@ -108,16 +123,16 @@ export function TrackMap({
 
         return {
             toCanvas: (x: number, z: number) => ({
-                x: cx + (x - midX) * scale,
-                y: cy + (z - midZ) * scale,
+                x: cx + (x - midX) * scale * (flipX ? -1 : 1),
+                y: cy + (z - midZ) * scale * (flipY ? -1 : 1),
             }),
             toWorld: (canvasX: number, canvasY: number) => ({
-                x: (canvasX - cx) / scale + midX,
-                z: (canvasY - cy) / scale + midZ,
+                x: (canvasX - cx) / scale / (flipX ? -1 : 1) + midX,
+                z: (canvasY - cy) / scale / (flipY ? -1 : 1) + midZ,
             }),
             scale,
         };
-    }, [historicalLines, referenceLine, showReference, dims, zoom, pan]);
+    }, [historicalLines, referenceLine, showReference, dims, zoom, pan, flipX, flipY]);
 
 
 
@@ -150,24 +165,24 @@ export function TrackMap({
                 else ctx.lineTo(pt.x, pt.y);
             });
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.lineWidth = 26;
+            ctx.lineWidth = 26 * zoom;
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             ctx.stroke();
 
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.5 * zoom;
             ctx.stroke();
 
             // Start/finish marker
             const start = transform.toCanvas(referenceLine[0].x, referenceLine[0].z);
             ctx.fillStyle = '#f59e0b';
             ctx.beginPath();
-            ctx.arc(start.x, start.y, 6, 0, Math.PI * 2);
+            ctx.arc(start.x, start.y, 6 * zoom, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = 'rgba(245, 158, 11, 0.3)';
             ctx.beginPath();
-            ctx.arc(start.x, start.y, 12, 0, Math.PI * 2);
+            ctx.arc(start.x, start.y, 12 * zoom, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -184,12 +199,12 @@ export function TrackMap({
 
                 if (isHighlighted) {
                     ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
-                    ctx.lineWidth = 3;
+                    ctx.lineWidth = 3 * zoom;
                     ctx.setLineDash([]);
                 } else {
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-                    ctx.lineWidth = 1;
-                    ctx.setLineDash([4, 4]);
+                    ctx.lineWidth = 1 * zoom;
+                    ctx.setLineDash([4 * zoom, 4 * zoom]);
                 }
                 ctx.stroke();
                 ctx.setLineDash([]);
@@ -215,12 +230,12 @@ export function TrackMap({
                 else ctx.lineTo(pt.x, pt.y);
             });
             ctx.strokeStyle = LINE_COLORS[idx % LINE_COLORS.length];
-            ctx.lineWidth = 2.5;
+            ctx.lineWidth = 2.5 * zoom;
             ctx.lineJoin = 'round';
             ctx.stroke();
         });
 
-    }, [historicalLines, referenceLine, showReference, dims, transform, gates, highlightedGateIndex]);
+    }, [historicalLines, referenceLine, showReference, dims, transform, gates, highlightedGateIndex, zoom]);
 
 
     // Layer 2: Draw current car position (runs 30fps)
@@ -246,6 +261,7 @@ export function TrackMap({
             ctx.save();
             ctx.translate(pt.x, pt.y);
             if (carYaw !== undefined) ctx.rotate(carYaw);
+            ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
 
             ctx.beginPath();
             ctx.moveTo(0, -10);
@@ -260,7 +276,7 @@ export function TrackMap({
             ctx.restore();
         }
 
-    }, [currentX, currentZ, carYaw, dims, transform]);
+    }, [currentX, currentZ, carYaw, dims, transform, flipX, flipY]);
 
     // Mouse handlers for zoom & pan
     const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -371,6 +387,27 @@ export function TrackMap({
                     />
                     <span>Show Track Outline</span>
                 </label>
+
+                <div className="flex gap-2">
+                    <label className="flex items-center space-x-2 text-xs text-neutral-400 bg-neutral-900/90 px-3 py-1.5 rounded-lg border border-neutral-700 cursor-pointer select-none backdrop-blur-sm">
+                        <input
+                            type="checkbox"
+                            checked={flipX}
+                            onChange={toggleFlipX}
+                            className="rounded border-neutral-600 bg-neutral-800 text-indigo-500 w-3.5 h-3.5"
+                        />
+                        <span>Flip X</span>
+                    </label>
+                    <label className="flex items-center space-x-2 text-xs text-neutral-400 bg-neutral-900/90 px-3 py-1.5 rounded-lg border border-neutral-700 cursor-pointer select-none backdrop-blur-sm">
+                        <input
+                            type="checkbox"
+                            checked={flipY}
+                            onChange={toggleFlipY}
+                            className="rounded border-neutral-600 bg-neutral-800 text-indigo-500 w-3.5 h-3.5"
+                        />
+                        <span>Flip Y</span>
+                    </label>
+                </div>
 
                 <div className="flex items-center gap-1">
                     <button
