@@ -112,14 +112,18 @@ export function runMockLap(
             return;
         }
 
-        if (frame >= totalFrames) {
-            clearInterval(interval);
-            onComplete();
-            return;
+        const currentLapFrame = frame % totalFrames;
+        const lapNumber = Math.floor(frame / totalFrames);
+
+        // When we cycle back to the start of a new lap
+        if (lapNumber > 0 && currentLapFrame === 0) {
+            // "cross the line"
+            // Reset distance traveled for realistic loop? It actually keeps counting up continuously in game.
+            // But LastLap updates.
         }
 
-        const pt = circuitPoints[frame];
-        const prevPt = frame > 0 ? circuitPoints[frame - 1] : pt;
+        const pt = circuitPoints[currentLapFrame];
+        const prevPt = currentLapFrame > 0 ? circuitPoints[currentLapFrame - 1] : pt;
         const dx = pt.x - prevPt.x;
         const dz = pt.z - prevPt.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
@@ -161,11 +165,11 @@ export function runMockLap(
             Boost: 0,
             Fuel: 1.0 - (frame / totalFrames) * 0.1,
             DistanceTraveled: distanceTraveled,
-            BestLap: 0,
-            LastLap: 0,
-            CurrentLap: timeInLap,
-            CurrentRaceTime: timeInLap,
-            LapNumber: 0,
+            BestLap: lapNumber > 0 ? LAP_DURATION_S : 0,
+            LastLap: lapNumber > 0 ? LAP_DURATION_S : 0,
+            CurrentLap: currentLapFrame / FPS,
+            CurrentRaceTime: frame / FPS,
+            LapNumber: lapNumber,
             RacePosition: 1,
             Accel: turnRate < 0.02 ? 255 : 180,
             Brake: turnRate > 0.03 ? 100 : 0,

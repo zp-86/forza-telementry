@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTelemetry, ConnectionState } from "@/hooks/useTelemetry";
 import { useLapManager, LapData } from "@/hooks/useLapManager";
 import { Activity, User, Play, Square, Wifi, WifiOff, Gamepad2 } from "lucide-react";
@@ -8,16 +8,83 @@ import { TrackMap } from "@/components/TrackMap";
 import { LapHistory } from "@/components/LapHistory";
 import { LapComparison } from "@/components/LapComparison";
 import { runMockLap } from "@/lib/mockLap";
+import referenceLineData from "@/lib/reference_line.json";
+import trackGates from "@/lib/gates.json";
 
 export default function Home() {
   const { data, connectionState, injectData } = useTelemetry();
 
   const [playerName, setPlayerName] = useState("Player 1");
   const [comparingLaps, setComparingLaps] = useState<[LapData, LapData] | null>(null);
+  const [viewingLap, setViewingLap] = useState<LapData | null>(null);
   const [testRunning, setTestRunning] = useState(false);
   const cancelMockRef = useRef<(() => void) | null>(null);
+  const [hiddenLapIds, setHiddenLapIds] = useState<Set<string>>(new Set());
+  const [savedLapIds, setSavedLapIds] = useState<Set<string>>(new Set());
 
-  const { laps } = useLapManager(data, playerName);
+  const { laps, setLaps } = useLapManager(data, playerName);
+
+  // Don't pass 0,0 position to TrackMap (game is paused)
+  const carX = data?.PositionX !== 0 || data?.PositionZ !== 0 ? data?.PositionX : undefined;
+  const carZ = data?.PositionX !== 0 || data?.PositionZ !== 0 ? data?.PositionZ : undefined;
+
+  // Visibility: default is ALL visible. We only track hidden laps.
+
+  // Load saved laps on mount
+  useEffect(() => {
+    fetch('/api/laps')
+      .then(res => res.json())
+      .then((savedLaps: LapData[]) => {
+        if (savedLaps.length > 0) {
+          setLaps(prev => {
+            const existingIds = new Set(prev.map(l => l.id));
+            const newLaps = savedLaps.filter(l => !existingIds.has(l.id));
+            return newLaps.length > 0 ? [...prev, ...newLaps] : prev;
+          });
+          setSavedLapIds(new Set(savedLaps.map(l => l.id)));
+        }
+      })
+      .catch(() => { /* silently fail if API not available */ });
+  }, [setLaps]);
+
+  const handleSave = async (lap: LapData) => {
+    try {
+      await fetch('/api/laps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lap),
+      });
+      setSavedLapIds(prev => new Set([...prev, lap.id]));
+    } catch (e) {
+      console.error('Failed to save lap:', e);
+    }
+  };
+
+  const handleDelete = async (lapId: string) => {
+    try {
+      await fetch('/api/laps', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: lapId }),
+      });
+      setSavedLapIds(prev => {
+        const next = new Set(prev);
+        next.delete(lapId);
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to delete lap:', e);
+    }
+  };
+
+  const handleToggleVisibility = (lapId: string) => {
+    setHiddenLapIds(prev => {
+      const next = new Set(prev);
+      if (next.has(lapId)) next.delete(lapId);
+      else next.add(lapId);
+      return next;
+    });
+  };
 
   const getSpeedMPH = (speedMs: number | undefined, vx: number, vy: number, vz: number) => {
     if (typeof speedMs === 'number' && !isNaN(speedMs)) {
@@ -77,17 +144,22 @@ export default function Home() {
   const connInfo = connectionInfo[connectionState];
   const showTestButton = connectionState !== "game-active" && !testRunning;
 
-  // Use the first completed lap as the reference track outline
-  const referenceLine = laps.length > 0 ? laps[0].points : [];
+  // Filter historicalLines by visibility (show all except hidden)
+  const visibleLapIds = new Set(laps.filter(l => !hiddenLapIds.has(l.id)).map(l => l.id));
+  const visibleLines = laps.filter(l => !hiddenLapIds.has(l.id)).map(l => l.points);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-white p-6 font-sans relative overflow-x-hidden">
 
-      {comparingLaps && (
+      {(comparingLaps || viewingLap) && (
         <LapComparison
-          lap1={comparingLaps[0]}
-          lap2={comparingLaps[1]}
-          onClose={() => setComparingLaps(null)}
+          baseLap={comparingLaps ? comparingLaps[0] : undefined}
+          compLap={comparingLaps ? comparingLaps[1] : viewingLap!}
+          isSingleView={!!viewingLap}
+          onClose={() => {
+            setComparingLaps(null);
+            setViewingLap(null);
+          }}
         />
       )}
 
@@ -149,9 +221,6 @@ export default function Home() {
         <div className="col-span-1 flex flex-col gap-6">
 
           <div className="flex-none border border-neutral-800 bg-neutral-900/50 backdrop-blur-md rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-10">
-              <svg viewBox="0 0 100 100" className="w-48 h-48 fill-current text-white"><path d="M50 0 L100 25 L100 75 L50 100 L0 75 L0 25 Z" /></svg>
-            </div>
             <h2 className="text-neutral-400 uppercase tracking-widest text-xs font-bold mb-6">Live Telemetry</h2>
 
             <div className="flex flex-col items-center justify-center my-8">
@@ -185,7 +254,18 @@ export default function Home() {
           </div>
 
           <div className="flex-1 border border-neutral-800 bg-neutral-900/50 backdrop-blur-md rounded-2xl p-6 shadow-xl overflow-hidden min-h-0">
-            <LapHistory laps={laps} onCompare={handleCompare} />
+            <LapHistory
+              laps={laps}
+              currentLapNumber={data?.LapNumber}
+              currentLapTime={data?.CurrentLap}
+              onCompare={handleCompare}
+              onView={(lap) => setViewingLap(lap)}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              visibleLapIds={visibleLapIds}
+              onToggleVisibility={handleToggleVisibility}
+              savedLapIds={savedLapIds}
+            />
           </div>
 
         </div>
@@ -199,11 +279,12 @@ export default function Home() {
             </div>
           ) : null}
           <TrackMap
-            currentX={data?.PositionX}
-            currentZ={data?.PositionZ}
+            currentX={carX}
+            currentZ={carZ}
             carYaw={data?.Yaw}
-            historicalLines={laps.map(l => l.points)}
-            referenceLine={referenceLine}
+            historicalLines={visibleLines}
+            referenceLine={referenceLineData}
+            gates={trackGates}
           />
         </div>
 
