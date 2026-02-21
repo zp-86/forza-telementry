@@ -16,7 +16,7 @@ export function useTelemetry() {
         let reconnectTimer: NodeJS.Timeout;
 
         const connect = () => {
-            ws = new WebSocket('ws://10.0.0.18:5301');
+            ws = new WebSocket('ws://localhost:5301');
 
             ws.onopen = () => {
                 // WebSocket is connected to our telemetry server, but we don't know if the game is sending yet
