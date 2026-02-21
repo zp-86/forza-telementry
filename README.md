@@ -6,7 +6,7 @@
 
 ## Quick Start
 
-To start, simply clone the repo and run either `start.bat` or `start.sh` (you may also run npm run start-all after installing packages). Set your in game telemtry settings to localhost on port 5300.
+To start, simply clone the repo and run either `start.bat` or `start.sh` (you may also run npm run start-all after installing packages). Set your in-game telemetry settings to localhost on port 5300.
 
 <sup> The web UI only works with Maple Valley (full circuit) for now, but there are plans to add more tracks and an easy way to map the track yourself in the future. </sup>
 
