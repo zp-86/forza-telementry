@@ -19,12 +19,19 @@ export default function Home() {
 
   const { laps } = useLapManager(data, playerName);
 
-  const getSpeedMPH = (speedMs: number) => {
-    return Math.round(Math.max(0, speedMs * 2.23694));
+  const getSpeedMPH = (speedMs: number | undefined, vx: number, vy: number, vz: number) => {
+    if (typeof speedMs === 'number' && !isNaN(speedMs)) {
+      return Math.round(Math.max(0, speedMs * 2.23694));
+    }
+    if (typeof vx === 'number' && typeof vy === 'number' && typeof vz === 'number') {
+      const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      return Math.round(Math.max(0, spd * 2.23694));
+    }
+    return 0;
   };
 
   const getRPM = (current: number, max: number) => {
-    if (!current || !max) return 0;
+    if (typeof current !== 'number' || typeof max !== 'number' || max === 0 || isNaN(current) || isNaN(max)) return 0;
     return Math.round((current / max) * 100);
   };
 
@@ -149,7 +156,7 @@ export default function Home() {
 
             <div className="flex flex-col items-center justify-center my-8">
               <div className="text-7xl font-light tabular-nums tracking-tighter">
-                {data ? getSpeedMPH(data.Speed) : "0"}
+                {data ? getSpeedMPH(data.Speed, data.VelocityX, data.VelocityY, data.VelocityZ) : "0"}
               </div>
               <div className="text-neutral-500 tracking-widest font-bold mt-1">MPH</div>
             </div>
@@ -168,11 +175,11 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-4 text-center">
               <div className="bg-neutral-800/50 p-4 rounded-xl">
                 <div className="text-neutral-500 text-xs font-bold uppercase tracking-wider mb-1">Gear</div>
-                <div className="text-3xl font-bold">{data?.Gear === 0 ? "R" : data?.Gear || "N"}</div>
+                <div className="text-3xl font-bold">{data?.Gear === 0 ? "R" : (typeof data?.Gear === 'number' && !isNaN(data.Gear) ? data.Gear : "N")}</div>
               </div>
               <div className="bg-neutral-800/50 p-4 rounded-xl">
                 <div className="text-neutral-500 text-xs font-bold uppercase tracking-wider mb-1">Lap</div>
-                <div className="text-3xl font-bold">{data ? data.LapNumber + 1 : "-"}</div>
+                <div className="text-3xl font-bold">{data && typeof data.LapNumber === 'number' && !isNaN(data.LapNumber) ? data.LapNumber + 1 : "-"}</div>
               </div>
             </div>
           </div>
@@ -185,6 +192,12 @@ export default function Home() {
 
         {/* Right Column - Track Map */}
         <div className="col-span-1 lg:col-span-3 border border-neutral-800 bg-neutral-900/50 backdrop-blur-md rounded-2xl shadow-xl flex flex-col overflow-hidden relative">
+          {data && data.PositionX === undefined ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-neutral-900/80 z-20 backdrop-blur-sm">
+              <h3 className="text-xl font-bold text-neutral-200 mb-2">Extended Telemetry Unavailable</h3>
+              <p className="text-neutral-400 text-sm max-w-md leading-relaxed">Your game is sending &quot;Sled&quot; telemetry format which lacks position and lap data. Please change the <strong>Data Out Packet Format</strong> to <strong>&quot;Dash&quot;</strong> in Forza settings to see the map and track lap history.</p>
+            </div>
+          ) : null}
           <TrackMap
             currentX={data?.PositionX}
             currentZ={data?.PositionZ}

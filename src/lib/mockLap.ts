@@ -38,11 +38,11 @@ export interface MockPacket {
     PositionX: number;
     PositionY: number;
     PositionZ: number;
-    CurrentEngineRpm: number;
     CarOrdinal: number;
     TrackOrdinal: number;
     _gamePaused?: boolean;
     // Simplified — we don't populate every field for the mock
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
 }
 

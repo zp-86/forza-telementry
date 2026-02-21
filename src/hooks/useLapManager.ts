@@ -13,9 +13,10 @@ export interface LapData {
     finalTime: number; // in seconds
     checkpoints: Checkpoint[];
     invalid: boolean; // if game paused or off track
-    points: { x: number, z: number }[]; // driving line
+    points: { x: number; z: number; d?: number }[]; // driving line
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useLapManager(telemetryData: any, currentPlayerName: string) {
     const [laps, setLaps] = useState<LapData[]>([]);
 
@@ -25,7 +26,7 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
         startTime: number;
         startDistance: number;
         checkpoints: Checkpoint[];
-        points: { x: number, z: number }[];
+        points: { x: number; z: number; d?: number }[];
         invalid: boolean;
         lastCheckpointDistance: number;
     }>({
@@ -82,8 +83,8 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
 
         // Record Points for Track Map (throttle to avoid massive arrays, e.g. every 10 meters)
         const distDriven = telemetryData.DistanceTraveled;
-        if (current.points.length === 0 || distDriven > current.points[current.points.length - 1].d + 10) {
-            current.points.push({ x: telemetryData.PositionX, z: telemetryData.PositionZ, d: distDriven } as any);
+        if (current.points.length === 0 || distDriven > (current.points[current.points.length - 1].d || 0) + 10) {
+            current.points.push({ x: telemetryData.PositionX, z: telemetryData.PositionZ, d: distDriven });
         }
 
         // Record Checkpoints (every 500 meters)

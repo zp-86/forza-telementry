@@ -1,5 +1,5 @@
 import { LapData } from "@/hooks/useLapManager";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft } from "lucide-react";
 
 export function LapComparison({
     lap1,

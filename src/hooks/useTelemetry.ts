@@ -5,17 +5,18 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export type ConnectionState = "disconnected" | "server-only" | "game-active";
 
 export function useTelemetry() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [data, setData] = useState<any>(null);
     const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
     const lastDataTime = useRef<number>(0);
-    const staleTimer = useRef<NodeJS.Timeout>();
+    const staleTimer = useRef<NodeJS.Timeout | undefined>(undefined);
 
     useEffect(() => {
         let ws: WebSocket;
         let reconnectTimer: NodeJS.Timeout;
 
         const connect = () => {
-            ws = new WebSocket('ws://localhost:5301');
+            ws = new WebSocket('ws://10.0.0.18:5301');
 
             ws.onopen = () => {
                 // WebSocket is connected to our telemetry server, but we don't know if the game is sending yet
@@ -61,7 +62,7 @@ export function useTelemetry() {
         };
     }, []);
 
-    // Allow injecting mock data directly (for the test button)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const injectData = useCallback((mockData: any) => {
         setData(mockData);
     }, []);
