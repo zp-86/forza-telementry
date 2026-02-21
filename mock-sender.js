@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const dgram = require('dgram');
 
 const client = dgram.createSocket('udp4');
