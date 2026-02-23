@@ -7,6 +7,7 @@ import { Activity, User, Play, Square, Wifi, WifiOff, Gamepad2 } from "lucide-re
 import { TrackMap } from "@/components/TrackMap";
 import { LapHistory } from "@/components/LapHistory";
 import { LapComparison } from "@/components/LapComparison";
+import { LiveCharts } from "@/components/LiveCharts";
 import { runMockLap } from "@/lib/mockLap";
 import referenceLineData from "@/lib/reference_line.json";
 import trackGates from "@/lib/gates.json";
@@ -21,8 +22,10 @@ export default function Home() {
   const cancelMockRef = useRef<(() => void) | null>(null);
   const [hiddenLapIds, setHiddenLapIds] = useState<Set<string>>(new Set());
   const [savedLapIds, setSavedLapIds] = useState<Set<string>>(new Set());
+  const [dynamicZoom, setDynamicZoom] = useState(false);
+  const [viewMode, setViewMode] = useState<'map' | 'charts'>('map');
 
-  const { laps, setLaps } = useLapManager(data, playerName);
+  const { laps, setLaps, livePoints } = useLapManager(data, playerName);
 
   // Don't pass 0,0 position to TrackMap (game is paused)
   const carX = data?.PositionX !== 0 || data?.PositionZ !== 0 ? data?.PositionX : undefined;
@@ -284,20 +287,47 @@ export default function Home() {
 
         {/* Right Column - Track Map */}
         <div className="col-span-1 lg:col-span-3 border border-neutral-800 bg-neutral-900/50 backdrop-blur-md rounded-2xl shadow-xl flex flex-col overflow-hidden relative">
-          {data && data.PositionX === undefined ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-neutral-900/80 z-20 backdrop-blur-sm">
-              <h3 className="text-xl font-bold text-neutral-200 mb-2">Extended Telemetry Unavailable</h3>
-              <p className="text-neutral-400 text-sm max-w-md leading-relaxed">Your game is sending &quot;Sled&quot; telemetry format which lacks position and lap data. Please change the <strong>Data Out Packet Format</strong> to <strong>&quot;Dash&quot;</strong> in Forza settings to see the map and track lap history.</p>
+
+          {/* View Toggle */}
+          <div className="absolute top-4 right-4 z-30 flex gap-2 bg-neutral-950/80 backdrop-blur-md p-1 rounded-lg border border-neutral-800">
+            <button
+              onClick={() => setViewMode('map')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-widest rounded-md transition-colors ${viewMode === 'map' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Map
+            </button>
+            <button
+              onClick={() => setViewMode('charts')}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-widest rounded-md transition-colors ${viewMode === 'charts' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Live Charts
+            </button>
+          </div>
+
+          {viewMode === 'map' ? (
+            <>
+              {data && data.PositionX === undefined ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-neutral-900/80 z-20 backdrop-blur-sm">
+                  <h3 className="text-xl font-bold text-neutral-200 mb-2">Extended Telemetry Unavailable</h3>
+                  <p className="text-neutral-400 text-sm max-w-md leading-relaxed">Your game is sending &quot;Sled&quot; telemetry format which lacks position and lap data. Please change the <strong>Data Out Packet Format</strong> to <strong>&quot;Dash&quot;</strong> in Forza settings to see the map and track lap history.</p>
+                </div>
+              ) : null}
+              <TrackMap
+                currentX={carX}
+                currentZ={carZ}
+                carYaw={data?.Yaw}
+                historicalLines={visibleLines}
+                referenceLine={referenceLineData}
+                gates={trackGates}
+                dynamicZoom={dynamicZoom}
+                onToggleDynamicZoom={() => setDynamicZoom(p => !p)}
+              />
+            </>
+          ) : (
+            <div className="flex-1 w-full h-full p-4 pt-16">
+              <LiveCharts points={livePoints} />
             </div>
-          ) : null}
-          <TrackMap
-            currentX={carX}
-            currentZ={carZ}
-            carYaw={data?.Yaw}
-            historicalLines={visibleLines}
-            referenceLine={referenceLineData}
-            gates={trackGates}
-          />
+          )}
         </div>
 
       </div>
