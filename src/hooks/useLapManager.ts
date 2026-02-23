@@ -14,7 +14,26 @@ export interface LapData {
     finalTime: number; // in seconds
     checkpoints: Checkpoint[];
     invalid: boolean; // if game paused or off track
-    points: { x: number; z: number; d?: number; time: number; speed: number }[]; // driving line + mini-sectors
+    points: {
+        x: number;
+        z: number;
+        d?: number;
+        time: number;
+        speed: number;
+        brake?: number;
+        accel?: number;
+        steer?: number;
+        gear?: number;
+        rpm?: number;
+    }[]; // driving line + mini-sectors
+    corners?: {
+        index: number;
+        startDist: number;
+        endDist: number;
+        maxBrake: number;
+        minSpeed: number;
+        avgSteer: number;
+    }[];
 }
 
 // Gate crossing check helpers (same math as LapComparison)
@@ -33,7 +52,7 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
         startTime: number;
         startDistance: number;
         checkpoints: Checkpoint[];
-        points: { x: number; z: number; d?: number; time: number; speed: number }[];
+        points: { x: number; z: number; d?: number; time: number; speed: number, brake?: number, accel?: number, steer?: number, gear?: number, rpm?: number }[];
         invalid: boolean;
         lastCheckpointDistance: number;
         gatesCrossed: number; // how many gates the car crossed this lap
@@ -94,6 +113,53 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
                     ? telemetryData.LastLap
                     : (telemetryData.CurrentRaceTime - current.startTime);
 
+                // --- CORNER DETECTION ALGORITHM ---
+                // We will scan the points to find contiguous regions of braking/steering
+                const corners: { index: number; startDist: number; endDist: number; maxBrake: number; minSpeed: number; avgSteer: number; }[] = [];
+                let inCorner = false;
+                let cStart = 0;
+                let cMaxBrake = 0;
+                let cMinSpeed = Infinity;
+                let cSteerSum = 0;
+                let cSteerCount = 0;
+                let cornerIdx = 1;
+
+                for (let i = 0; i < current.points.length; i++) {
+                    const p = current.points[i];
+                    const isBraking = (p.brake || 0) > 15; // > ~5% brake
+                    const isTurning = Math.abs(p.steer || 0) > 20; // some significant steering
+
+                    if (isBraking || isTurning) {
+                        if (!inCorner) {
+                            inCorner = true;
+                            cStart = p.d || 0;
+                            cMaxBrake = 0;
+                            cMinSpeed = Infinity;
+                            cSteerSum = 0;
+                            cSteerCount = 0;
+                        }
+                        cMaxBrake = Math.max(cMaxBrake, p.brake || 0);
+                        cMinSpeed = Math.min(cMinSpeed, p.speed);
+                        cSteerSum += (p.steer || 0);
+                        cSteerCount++;
+                    } else if (inCorner) {
+                        // Finished corner? Wait to see if we are really out of it (straight for > 30 meters)
+                        // For simplicity, we just close the corner when neither braking nor turning
+                        const length = (p.d || 0) - cStart;
+                        if (length > 20) { // corner must be at least 20 meters long
+                            corners.push({
+                                index: cornerIdx++,
+                                startDist: cStart,
+                                endDist: p.d || 0,
+                                maxBrake: cMaxBrake,
+                                minSpeed: cMinSpeed,
+                                avgSteer: cSteerSum / cSteerCount
+                            });
+                        }
+                        inCorner = false;
+                    }
+                }
+
                 // Save previous lap
                 const finishedLap: LapData = {
                     id: `${current.lapNumber}-${Date.now()}`,
@@ -103,6 +169,7 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
                     checkpoints: [...current.checkpoints],
                     invalid: current.invalid || missedTooMany,
                     points: [...current.points],
+                    corners: corners
                 };
 
                 // Only save laps that actually took time
@@ -151,7 +218,14 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
                 z: telemetryData.PositionZ,
                 d: relativeDist,
                 time: telemetryData.CurrentLap,
-                speed: telemetryData.Speed * 2.23694 // calculate speed in mph for this 10m sector
+                speed: telemetryData.Speed * 2.23694, // calculate speed in mph for this 10m sector
+                brake: telemetryData.Brake || 0,
+                accel: telemetryData.Accel || 0,
+                steer: telemetryData.Steer || 0,
+                gear: telemetryData.Gear || 0,
+                rpm: telemetryData.CurrentEngineRpm && telemetryData.EngineMaxRpm
+                    ? (telemetryData.CurrentEngineRpm / telemetryData.EngineMaxRpm)
+                    : 0
             };
 
             // ---- GATE TRACKING: Check if we crossed any gates ----
@@ -185,6 +259,6 @@ export function useLapManager(telemetryData: any, currentPlayerName: string) {
 
     const clearLaps = () => setLaps([]);
 
-    return { laps, setLaps, clearLaps };
+    return { laps, setLaps, clearLaps, livePoints: currentLapRef.current.points };
 }
 

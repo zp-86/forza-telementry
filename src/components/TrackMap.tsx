@@ -25,6 +25,8 @@ interface DataPoint {
     d?: number;
     time?: number;
     speed?: number;
+    brake?: number;
+    accel?: number;
 }
 
 export function TrackMap({
@@ -35,6 +37,9 @@ export function TrackMap({
     referenceLine = [],
     gates = [],
     highlightedGateIndex,
+    hoverDistance,
+    dynamicZoom,
+    onToggleDynamicZoom,
 }: {
     currentX?: number;
     currentZ?: number;
@@ -43,6 +48,9 @@ export function TrackMap({
     referenceLine?: { x: number; z: number }[];
     gates?: TrackGate[];
     highlightedGateIndex?: number | null;
+    hoverDistance?: number | null;
+    dynamicZoom?: boolean; // New prop for centering on car
+    onToggleDynamicZoom?: () => void;
 }) {
     const bgCanvasRef = useRef<HTMLCanvasElement>(null);
     const fgCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,6 +67,7 @@ export function TrackMap({
 
     const [flipX, setFlipX] = useState(false);
     const [flipY, setFlipY] = useState(false);
+    const [colorMode, setColorMode] = useState<'lap' | 'inputs'>('lap');
 
     // load from local storage
     useEffect(() => {
@@ -121,6 +130,29 @@ export function TrackMap({
         const midX = (maxX + minX) / 2;
         const midZ = (maxZ + minZ) / 2;
 
+        if (dynamicZoom && currentX !== undefined && currentZ !== undefined) {
+            // Lock map so currentX/currentZ is at the exact center of screen
+            // Normally: canvas_x = cx + (x - midX) * scale
+            // To make canvas_x = w/2, we need: w/2 = w/2 + panX + (currentX - midX) * scale
+            // => panX = -(currentX - midX) * scale
+            const targetPanX = -(currentX - midX) * scale * (flipX ? -1 : 1);
+            const targetPanY = -(currentZ - midZ) * scale * (flipY ? -1 : 1);
+
+            // To prevent React re-render looping, we won't `setPan`, we'll just override cx/cy locally
+            return {
+                toCanvas: (x: number, z: number) => ({
+                    x: dims.w / 2 + (x - currentX) * scale * (flipX ? -1 : 1),
+                    y: dims.h / 2 + (z - currentZ) * scale * (flipY ? -1 : 1),
+                }),
+                toWorld: (canvasX: number, canvasY: number) => ({
+                    x: (canvasX - dims.w / 2) / scale / (flipX ? -1 : 1) + currentX,
+                    z: (canvasY - dims.h / 2) / scale / (flipY ? -1 : 1) + currentZ,
+                }),
+                scale,
+                isDynamic: true
+            };
+        }
+
         return {
             toCanvas: (x: number, z: number) => ({
                 x: cx + (x - midX) * scale * (flipX ? -1 : 1),
@@ -131,8 +163,9 @@ export function TrackMap({
                 z: (canvasY - cy) / scale / (flipY ? -1 : 1) + midZ,
             }),
             scale,
+            isDynamic: false
         };
-    }, [historicalLines, referenceLine, showReference, dims, zoom, pan, flipX, flipY]);
+    }, [historicalLines, referenceLine, showReference, dims, zoom, pan, flipX, flipY, dynamicZoom, currentX, currentZ]);
 
 
 
@@ -165,13 +198,13 @@ export function TrackMap({
                 else ctx.lineTo(pt.x, pt.y);
             });
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-            ctx.lineWidth = 26 * zoom;
+            ctx.lineWidth = 12 * zoom; // Was 26
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             ctx.stroke();
 
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 1.5 * zoom;
+            ctx.lineWidth = 1 * zoom; // Was 1.5
             ctx.stroke();
 
             // Start/finish marker
@@ -223,19 +256,38 @@ export function TrackMap({
         // 3. Draw historical lap lines
         historicalLines.forEach((line, idx) => {
             if (line.length < 2) return;
-            ctx.beginPath();
-            line.forEach((p, i) => {
-                const pt = transform.toCanvas(p.x, p.z);
-                if (i === 0) ctx.moveTo(pt.x, pt.y);
-                else ctx.lineTo(pt.x, pt.y);
-            });
-            ctx.strokeStyle = LINE_COLORS[idx % LINE_COLORS.length];
-            ctx.lineWidth = 2.5 * zoom;
-            ctx.lineJoin = 'round';
-            ctx.stroke();
+
+            const defaultColor = LINE_COLORS[idx % LINE_COLORS.length];
+
+            for (let i = 1; i < line.length; i++) {
+                const pt1 = transform.toCanvas(line[i - 1].x, line[i - 1].z);
+                const pt2 = transform.toCanvas(line[i].x, line[i].z);
+
+                let color = defaultColor;
+                if (colorMode === 'inputs') {
+                    // Check inputs at point i
+                    const b = line[i].brake || 0;
+                    const a = line[i].accel || 0;
+                    if (b > 10) {
+                        color = 'rgba(239, 68, 68, 0.9)'; // red
+                    } else if (a > 10) {
+                        color = 'rgba(34, 197, 94, 0.9)'; // green
+                    } else {
+                        color = 'rgba(251, 191, 36, 0.9)'; // yellow coasting
+                    }
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(pt1.x, pt1.y);
+                ctx.lineTo(pt2.x, pt2.y);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.2 * zoom; // Was 2.5
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
         });
 
-    }, [historicalLines, referenceLine, showReference, dims, transform, gates, highlightedGateIndex, zoom]);
+    }, [historicalLines, referenceLine, showReference, dims, transform, gates, highlightedGateIndex, zoom, colorMode]);
 
 
     // Layer 2: Draw current car position (runs 30fps)
@@ -276,7 +328,37 @@ export function TrackMap({
             ctx.restore();
         }
 
-    }, [currentX, currentZ, carYaw, dims, transform, flipX, flipY]);
+        // Draw Hover Scrubber Dot from TelemetryChart
+        if (hoverDistance !== undefined && hoverDistance !== null && transform) {
+            historicalLines.forEach((line, idx) => {
+                // Find point matching distance
+                if (!line || line.length === 0) return;
+                let closest = line[0];
+                let minDist = Math.abs((closest.d || 0) - hoverDistance);
+                for (let i = 1; i < line.length; i++) {
+                    const d = Math.abs((line[i].d || 0) - hoverDistance);
+                    if (d < minDist) {
+                        minDist = d;
+                        closest = line[i];
+                    } else if (d > minDist) {
+                        break;
+                    }
+                }
+
+                if (closest && minDist < 50) { // Only draw if we found a point roughly close
+                    const pt = transform.toCanvas(closest.x, closest.z);
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = LINE_COLORS[idx % LINE_COLORS.length];
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            });
+        }
+
+    }, [currentX, currentZ, carYaw, dims, transform, flipX, flipY, hoverDistance, historicalLines]);
 
     // Mouse handlers for zoom & pan
     const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -293,7 +375,7 @@ export function TrackMap({
     }, []);
 
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
-        if (isPanningRef.current) {
+        if (isPanningRef.current && !dynamicZoom) {
             const dx = e.clientX - lastMouseRef.current.x;
             const dy = e.clientY - lastMouseRef.current.y;
             setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
@@ -378,7 +460,22 @@ export function TrackMap({
         >
             {/* Controls overlay */}
             <div className="absolute top-3 right-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2">
-                <label className="flex items-center space-x-2 text-xs text-neutral-400 bg-neutral-900/90 px-3 py-1.5 rounded-lg border border-neutral-700 cursor-pointer select-none backdrop-blur-sm">
+                <div className="flex bg-neutral-900/90 rounded-lg p-0.5 border border-neutral-700 backdrop-blur-sm self-end">
+                    <button
+                        onClick={() => setColorMode('lap')}
+                        className={`px-3 py-1 text-xs font-bold uppercase tracking-widest rounded-md transition-colors ${colorMode === 'lap' ? 'bg-indigo-500/20 text-indigo-400' : 'text-neutral-500 hover:text-white'}`}
+                    >
+                        Lap Colors
+                    </button>
+                    <button
+                        onClick={() => setColorMode('inputs')}
+                        className={`px-3 py-1 text-xs font-bold uppercase tracking-widest rounded-md transition-colors flex items-center gap-1 ${colorMode === 'inputs' ? 'bg-amber-500/20 text-amber-400' : 'text-neutral-500 hover:text-white'}`}
+                    >
+                        Inputs <div className="flex"><div className="w-2 h-2 rounded-full bg-red-500"></div><div className="w-2 h-2 rounded-full bg-green-500 -ml-1"></div></div>
+                    </button>
+                </div>
+
+                <label className="flex items-center space-x-2 text-xs text-neutral-400 bg-neutral-900/90 px-3 py-1.5 rounded-lg border border-neutral-700 cursor-pointer select-none backdrop-blur-sm self-end">
                     <input
                         type="checkbox"
                         checked={showReference}
@@ -422,6 +519,18 @@ export function TrackMap({
                         onClick={resetView}
                         className="bg-neutral-900/90 border border-neutral-700 text-neutral-400 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold backdrop-blur-sm"
                     >Reset</button>
+
+                    {dynamicZoom !== undefined && (
+                        <div className="w-px h-4 bg-neutral-700 mx-1"></div>
+                    )}
+                    {dynamicZoom !== undefined && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); if (onToggleDynamicZoom) onToggleDynamicZoom(); }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold backdrop-blur-sm border transition-colors ${dynamicZoom ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/50' : 'bg-neutral-900/90 border-neutral-700 text-neutral-400 hover:text-white'}`}
+                        >
+                            {dynamicZoom ? "Auto-Focus On" : "Auto-Focus Off"}
+                        </button>
+                    )}
                 </div>
             </div>
 
